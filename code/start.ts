@@ -26,17 +26,25 @@ watcher.on("change", (path) => {
   });
 });
 
+const urlResolver = (url?: string) => {
+  if (!url || url === '/') return path.join(process.cwd(), "public", "index.html");
+  if (url.startsWith("/src")) return path.join(process.cwd(), url);
+  else return path.join(process.cwd(), "public", url);
+};
+
 const requestEventListener: RequestListener = function (req, res) {
-  res.setHeader("Content-Type", "text/html");
+  const requested_path = urlResolver(req.url);
   res.writeHead(200);
-  fs.readFile(
-    path.join(process.cwd(), "index.html"),
-    { encoding: "utf-8" },
-    (error, value) => {
-      if (error) res.end("<div>Not found</div>");
-      res.end(value.replace('</body>', `${connection_string}</body>`));
+  fs.readFile(requested_path, { encoding: "utf-8" }, (error, value) => {
+    if (error) {
+      res.end("<div>Not found</div>");
+      console.log(requested_path);
+      return;
     }
-  );
+    if (requested_path.endsWith(".html"))
+      res.end(value.replace("</body>", `${connection_string}</body>`));
+    else res.end(value);
+  });
 };
 
 const server = http.createServer(requestEventListener);
