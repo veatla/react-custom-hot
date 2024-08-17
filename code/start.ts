@@ -1,7 +1,7 @@
 import http, { RequestListener } from "http";
 
 import path from "path";
-import { PORT, HOST, connection_string } from "./constants";
+import { PORT, HOST, frontend_ws_code } from "./constants";
 import chokidar from "chokidar";
 import fileParser from "./file_parser";
 import * as Socket from "ws";
@@ -9,7 +9,7 @@ import esbuild from "esbuild";
 
 // Простой сборщик на esbuild
 const builder = async () => {
-  esbuild.build({
+  return esbuild.build({
     entryPoints: ["./src/main.jsx"],
     bundle: true,
     outfile: "./temp/bundle.js",
@@ -35,12 +35,13 @@ watcher.on("change", (path) => {
   // Отправка сообщения всем подключенным клиентам
   ws.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
-      const data = {
-        file: `src/main.js`,
-        type: "change",
-      };
-      builder()
-      client.send(JSON.stringify(data));
+      builder().then(() => {
+        const data = {
+          file: "temp/bundle.js",
+          type: "change",
+        };
+        client.send(JSON.stringify(data));
+      });
     }
   });
 });
@@ -50,31 +51,40 @@ const urlResolver = (url?: string) => {
     return path.join(process.cwd(), "public", "index.html");
   if (url.startsWith("/src")) return path.join(process.cwd(), url);
   if (url.startsWith("/temp")) return path.join(process.cwd(), url);
-  else return path.join(process.cwd(), "public", url);
+  else if (path.isAbsolute(url)) return path.join(process.cwd(), "public", url);
+  else return path.join(process.cwd(), "temp", url);
 };
 
-const requestEventListener: RequestListener = function (req, res) {
+const requestEventListener: RequestListener = async function (req, res) {
   const requested_path = urlResolver(req.url);
-  fileParser
-    .build(requested_path)
-    .then((code) => {
-      if (requested_path.endsWith(".html"))
-        res.end(
-          code.replace("./src/main.jsx", "./temp/bundle.js") + connection_string
-        );
-      else if (requested_path.endsWith(".js")) {
-        // Content-Type: application/javascript
-        res.setHeader("Content-Type", "application/javascript");
-        console.log("set header");
-        res.end(code);
-      } else {
-        res.end(code);
-      }
-    })
-    .catch((error) => {
-      console.log(`Error ${requested_path}`, error);
-      res.end("<div>Not found</div>");
-    });
+  console.log(`Requesting file: ${requested_path} before parse: ${req.url}`);
+  const filedata = await fileParser.build(requested_path).catch(() => null);
+
+  if (!filedata) {
+    res.statusCode = 404;
+    res.end();
+    return;
+  }
+
+  // If it's html
+  if (requested_path.endsWith(".html")) {
+    // Replace <script/> import source with builded file
+    const replace_script_import =
+      filedata.replace("./src/main.jsx", "./temp/bundle.js") +
+      frontend_ws_code;
+
+    // send to frontend
+    res.end(replace_script_import);
+  }
+  // if it's js file
+  else if (requested_path.endsWith(".js")) {
+    // set the repsonse header
+    res.setHeader("Content-Type", "application/javascript");
+    // send to frontend
+    res.end(filedata);
+  }
+  // otherwise just send data to frontend
+  else res.end(filedata);
 };
 
 export const server = http.createServer(requestEventListener);
