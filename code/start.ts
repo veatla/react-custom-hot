@@ -1,7 +1,7 @@
 import http, { RequestListener } from "http";
 
 import path from "path";
-import { PORT, HOST, frontend_ws_code } from "./constants";
+import { PORT, HOST, frontend_ws_code, BUILD_DIR } from "./constants";
 import chokidar from "chokidar";
 import fileParser from "./file_parser";
 import * as Socket from "ws";
@@ -12,8 +12,9 @@ const builder = async () => {
   return esbuild.build({
     entryPoints: ["./src/main.jsx"],
     bundle: true,
-    outfile: "./temp/bundle.js",
+    outfile: path.join(BUILD_DIR, 'temp', "bundle.js"),
     sourcemap: true,
+    jsx: 'automatic',
     loader: { ".js": "jsx" },
   });
 };
@@ -29,15 +30,15 @@ const watcher = chokidar.watch("src", {
 
 // Отслеживание изменений
 
-watcher.on("change", (path) => {
+watcher.on("change", (path, stats) => {
   console.log(`File ${path} has been changed`);
-
+  
   // Отправка сообщения всем подключенным клиентам
   ws.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       builder().then(() => {
         const data = {
-          file: "temp/bundle.js",
+          file: path,
           type: "change",
         };
         client.send(JSON.stringify(data));
@@ -49,10 +50,10 @@ watcher.on("change", (path) => {
 const urlResolver = (url?: string) => {
   if (!url || url === "/")
     return path.join(process.cwd(), "public", "index.html");
-  if (url.startsWith("/src")) return path.join(process.cwd(), url);
-  if (url.startsWith("/temp")) return path.join(process.cwd(), url);
+  if (url.startsWith("/src")) return path.join(BUILD_DIR, url);
+  if (url.startsWith("/temp")) return path.join(BUILD_DIR, url);
   else if (path.isAbsolute(url)) return path.join(process.cwd(), "public", url);
-  else return path.join(process.cwd(), "temp", url);
+  else return path.join(BUILD_DIR, url);
 };
 
 const requestEventListener: RequestListener = async function (req, res) {
