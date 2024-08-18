@@ -1,21 +1,44 @@
-export const PORT = 8000;
+import config from '../config.json';
+import path from "path";
+
+export const PORT = config.port || 8000;
 export const HOST = "localhost";
-export const WS = 3030;
 
-export const connection_string =`<script>
-  const socket = new WebSocket("ws://localhost:3030");
+export const BUILD_DIR = path.join(process.cwd(), "node_modules", "@veatla");
 
-  socket.onopen = () => {
-    console.log("WebSocket connection opened");
-  };
+export const frontend_ws_code = `<script>
+  function conn() {
+    const socket = new WebSocket('ws://localhost:${PORT}');
+    socket.onopen = function() {
+      console.log("ws:connected");
+    };
 
-  socket.onmessage = (event) => {
-    console.log("Message from server:", event.data);
-    window.location.reload();
-  };
 
-  socket.onclose = () => {
-    console.log("WebSocket connection closed");
-  };
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log("ws:message::", data);
+      fetch('http://localhost:${PORT}/' + data.file, {
+        mode: 'no-cors'
+      }).then((res) => {
+        res.text().then((buff) => {
+          eval(buff)
+        })
+      });
+    };
+      
+    socket.onclose = function(e) {
+      console.log('ws:reconnecting::1sec');
+      setTimeout(function() {
+        conn();
+      }, 1000);
+    };
+
+    socket.onerror = function(err) {
+      socket.close();
+    };
+  }
+
+  conn();
 </script>
 `;
+
